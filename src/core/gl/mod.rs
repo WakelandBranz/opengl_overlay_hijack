@@ -1,8 +1,9 @@
-use windows::core::PCSTR;
+mod vsync;
+
 use windows::Win32::Foundation::{GetLastError, HWND};
 use windows::Win32::Graphics::Gdi::{GetDC, ReleaseDC, HDC, WGL_SWAP_MAIN_PLANE};
 use windows::Win32::Graphics::OpenGL::{PFD_DRAW_TO_WINDOW, PFD_SUPPORT_OPENGL, PFD_TYPE_RGBA, PIXELFORMATDESCRIPTOR, PFD_DOUBLEBUFFER, ChoosePixelFormat, SetPixelFormat, wglCreateContext, wglMakeCurrent, HGLRC, wglDeleteContext, GetPixelFormat, DescribePixelFormat, wglSwapLayerBuffers};
-use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
+use crate::core::gl::vsync::VsyncState;
 use crate::core::OverlayError;
 
 #[derive(Clone)]
@@ -10,10 +11,11 @@ pub struct GlContext {
     pub window_handle: HWND,
     pub device_context: HDC,
     pub gl_context: HGLRC,
+    vsync_state: VsyncState,
 }
 
 impl GlContext {
-    pub fn new(hwnd: HWND, _vsync: bool) -> Result<Self, OverlayError> {
+    pub fn new(hwnd: HWND) -> Result<Self, OverlayError> {
         unsafe {
             // Get device context
             let device_context = GetDC(Some(hwnd));
@@ -61,10 +63,14 @@ impl GlContext {
                     OverlayError::FailedToMakeOpenGLContextCurrent
                 })?;
 
+            let mut vsync_state = VsyncState::new();
+            vsync_state.init().expect("Failed to initialize Vsync State!");
+
             Ok(Self {
                 window_handle: hwnd,
                 device_context,
                 gl_context,
+                vsync_state,
             })
         }
     }
@@ -104,27 +110,6 @@ impl GlContext {
         }
     }
 
-    fn set_vsync(vsync: bool) -> Result<(), OverlayError> {
-        // Load the OpenGL extension functions
-        let wgl_swap_interval_ext: unsafe extern "system" fn(i32) -> i32 = unsafe {
-            let wgl_lib = LoadLibraryA(PCSTR("opengl32.dll".as_ptr()))
-                .map_err(|e| {
-                    println!("Failed to retrieve OpenGL library binary for vsync: {:?}", e);
-                    OverlayError::FailedToRetrieveOpenGLBinary
-                })?;
-            let proc_name = b"wglSwapIntervalEXT\0";
-            let wgl_swap_interval = GetProcAddress(wgl_lib, PCSTR(proc_name.as_ptr()));
-            std::mem::transmute(wgl_swap_interval)
-        };
-
-        // Disable V-Sync by setting the swap interval to 0
-        unsafe {
-            wgl_swap_interval_ext(vsync as i32);
-        }
-
-        Ok(())
-    }
-
     pub(crate) fn make_current(&self) -> Result<(), OverlayError> {
         unsafe {
             wglMakeCurrent(self.device_context, self.gl_context)
@@ -144,6 +129,19 @@ impl GlContext {
                     OverlayError::FailedToSwapBuffers
                 })
         }
+    }
+
+    // Expose vsync control methods
+    pub fn set_vsync(&self, enabled: bool) -> Result<(), OverlayError> {
+        self.vsync_state.set_enabled(enabled)
+    }
+
+    pub fn get_vsync_state(&self) -> Option<bool> {
+        self.vsync_state.get_current_state()
+    }
+
+    pub fn is_vsync_supported(&self) -> bool {
+        self.vsync_state.is_supported()
     }
 }
 

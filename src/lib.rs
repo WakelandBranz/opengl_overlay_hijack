@@ -147,7 +147,7 @@ mod tests {
                 blue
             ).expect("Failed to draw gradient line");
 
-            overlay.present_scene().unwrap();
+            overlay.end_scene().unwrap();
         }
     }
 }

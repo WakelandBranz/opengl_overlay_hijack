@@ -125,10 +125,17 @@ impl Overlay {
     }
 
     pub fn startup_renderer(&mut self, vsync: bool) -> Result<(), OverlayError> {
-        let gl_context = GlContext::new(self.window_handle, vsync)
+        let gl_context = GlContext::new(self.window_handle)
             .map_err(|_| OverlayError::GlContextSetupFailed)?;
-
-        gl_context.print_pixel_format();
+        
+        if gl_context.is_vsync_supported() {
+            gl_context.set_vsync(vsync).expect("Failed to set vsync state!");
+        } else {
+            println!("Functions required to set vsync were not found. It may not be supported on your system.")
+        }
+        
+        // For debugging
+        //gl_context.print_pixel_format();
 
         // Make GL context current before creating Skia context
         gl_context.make_current()?;
@@ -150,7 +157,7 @@ impl Overlay {
         Ok(())
     }
 
-    pub fn present_scene(&mut self) -> Result<(), OverlayError> {
+    pub fn end_scene(&mut self) -> Result<(), OverlayError> {
         let sk_context = self.skia_context.as_mut()
             .ok_or(OverlayError::NoRenderTarget)?;
 
@@ -161,6 +168,29 @@ impl Overlay {
         gl_context.swap_buffers()?;
 
         Ok(())
+    }
+
+    /// BACKWARDS COMPATIBILITY I DUNNO
+    pub fn force_clear_scene(&mut self) -> Result<(), OverlayError> {
+        self.begin_scene()
+    }
+
+    pub fn get_text_width(&self, text: impl AsRef<str>) -> f32 {
+        let text = text.as_ref();
+        // Create buffer for glyph IDs - one per character
+        let mut glyph_ids = vec![0u16; text.len()];
+
+        // Convert text to glyph IDs
+        self.font.text_to_glyphs(text, &mut glyph_ids);
+
+        // Create array to store widths
+        let mut widths = vec![0.0; glyph_ids.len()];
+
+        // Get the widths for these glyphs
+        self.font.get_widths(&glyph_ids, &mut widths);
+
+        // Sum all widths for total
+        widths.iter().sum()
     }
 }
 
@@ -201,6 +231,8 @@ pub enum OverlayError {
     GlContextSetupFailed,
     SkiaContextSetupFailed,
 
+    VsyncControlNotSupported,
+
     NoRenderTarget,
     GetWindowRectFailed,
     GetWriteTextFormatFailed,
@@ -225,4 +257,7 @@ pub enum OverlayError {
     FailedToCreateSkiaSurface,
     FailedToSwapBuffers,
     FailedToRetrieveOpenGLBinary,
+    FailedToGetVsyncFunctionPointers,
+    FailedToSetVsyncState,
+    FailedToVerifyVsyncState,
 }
